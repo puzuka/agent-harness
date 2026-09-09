@@ -7,9 +7,9 @@ export const taskSchema=object({
   contract:{const:CONTRACT},id,revision:integer(1),projectId:id,authorId:id,sessionId:id,
   requirementIds:ids(),inputPaths:texts(1),
   criteria:array(object({id,requirementId:nullable(id),target:{type:'boolean'},bindingIds:array(id,0,true)}),1),
-  bindings:array(object({id,profile:id,kind:{enum:['node-test','command']},argv:array(text,1),selectors:texts(),
+  bindings:array(object({id,profile:id,kind:{enum:['node-test','command','cargo-test','vitest']},argv:array(text,1),selectors:texts(),
     expectedExit:integer(0,255),expectedStdout:nullable({type:'string',maxLength:65536}),mutation:{type:'boolean'},artifacts:texts()}),1),
-  policy:object({id,reviewerIds:ids(),requireReview:{type:'boolean'},timeoutMs:integer(10,600000),maxOutputBytes:integer(1024,16777216),maxAttempts:integer(1,3)}),
+  policy:object({id,reviewerIds:ids(),requireReview:{type:'boolean'},timeoutMs:integer(10,600000),maxOutputBytes:integer(1024,16777216),maxAttempts:integer(1,20)}),
 });
 taskSchema.properties!.baseline=object({path:text,sha256:hash,warningDispositions:array(object({id:hash,reason:text}),0)});
 export const runSchema=object({
@@ -36,9 +36,14 @@ export function parseTask(value: unknown): TaskDefinition {
   }
   for(const r of task.requirementIds) if(!task.criteria.some(c=>c.requirementId===r)) throw new Error('REQUIREMENT_WITHOUT_CRITERIA');
   for(const b of task.bindings) {
-    if(b.kind==='node-test'&&(!b.selectors.length||b.argv.some(a=>a.startsWith('-'))||b.expectedExit!==0)) throw new Error('NODE_TEST_REQUIRES_FILES_AND_SELECTORS');
-    if(b.kind==='command'&&b.selectors.length) throw new Error('COMMAND_HAS_NO_TEST_SELECTORS');
-    if(b.kind==='command'&&b.expectedStdout===null) throw new Error('COMMAND_ORACLE_REQUIRED');
+    if(b.kind==='command') {
+      if(b.selectors.length) throw new Error('COMMAND_HAS_NO_TEST_SELECTORS');
+      if(b.expectedStdout===null) throw new Error('COMMAND_ORACLE_REQUIRED');
+    } else {
+      // Runner kinds collect named observations: files/args pinned, no flags, exit 0, explicit selectors.
+      if(!b.selectors.length||b.argv.some(a=>a.startsWith('-'))||b.expectedExit!==0)
+        throw new Error(b.kind==='node-test'?'NODE_TEST_REQUIRES_FILES_AND_SELECTORS':'RUNNER_REQUIRES_FILES_AND_SELECTORS');
+    }
     if(!task.criteria.some(c=>c.bindingIds.includes(b.id))) throw new Error('ORPHAN_BINDING');
   }
   if(task.policy.requireReview&&!task.policy.reviewerIds.length) throw new Error('REVIEW_ASSIGNMENT_REQUIRED');

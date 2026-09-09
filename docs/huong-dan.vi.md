@@ -112,7 +112,7 @@ Exit `0` chỉ xác nhận không có lỗi cấu trúc. Vẫn phải xử lý w
 
 [Ví dụ CLI đầy đủ](usage.md#local-cli-walkthrough) tạo một dự án tạm, lấy identity thật, ghi một task JSON, chạy lệnh, xem evidence và hoàn tất task minh họa. Không cần model hoặc API trả phí.
 
-Các lệnh chính: `help`, `doctor`, `init`, `identity`, `create`, `revise`, `run`, `status`, `complete`, `cancel`, `recover`, `export`, `migrate`. `status` trả exit `2` khi task chưa đủ điều kiện. Chỉ `init` có preview/apply; `create` và `run` là thao tác ghi/chạy thật.
+Các lệnh chính: `help`, `doctor`, `init`, `identity`, `new-task`, `review --prepare/--check`, `create`, `revise`, `run`, `status [--why]`, `watch`, `complete`, `cancel`, `recover`, `export`, `board`, `mcp` (chỉ đọc), `migrate`. `status` trả exit `2` khi task chưa đủ điều kiện. Chỉ `init` có preview/apply; `create`, `revise` và `run` là thao tác ghi/chạy thật. `new-task` chỉ sinh draft JSON (ghi file khi có `--out`), chưa ghi vào store. `review` chỉ đóng gói bằng chứng và kiểm tra cấu trúc VERDICT — không tự ghi Review, không tự phong reviewer. `watch` tự chạy lại binding khi input đổi hash và dừng khi hết ngân sách attempt; trần `maxAttempts` của contract là 20. Binding hỗ trợ các kind `node-test`, `command`, `cargo-test`, `vitest` (runner vitest phải được pin trong `inputPaths`).
 
 CLI không có lệnh tạo review độc lập, không phải MCP server và không tự nạp mọi lệnh agent vào recorder. Công việc cần reviewer mà chưa có tích hợp reviewer vẫn phải giữ pending. Ví dụ review-exempt chỉ dành cho bài thử nhỏ, không dùng để bỏ điều kiện nghiệm thu thật.
 

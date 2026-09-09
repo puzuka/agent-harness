@@ -131,21 +131,26 @@ node "$HARNESS_HOME/bin/harness.mjs" help
 node "$HARNESS_HOME/bin/harness.mjs" doctor --root "$PROJECT"
 ```
 
-`help` is the command; do not assume `--help` or undocumented flags are supported. Accepted options are `--root`, `--project`, `--file`, `--task`, `--binding` and `--apply`; use the appropriate ones below. There is no `review`, `bind`, `approve`, `reconcile` or `release` CLI command.
+`help` is the command; do not assume `--help` or undocumented flags are supported. Accepted options are `--root`, `--project`, `--file`, `--task`, `--binding`, `--apply` plus the per-command options listed below; use the appropriate ones. There is no `bind`, `approve`, `reconcile` or `release` CLI command, and `review` only packages and structurally checks verdicts — it cannot record a Review.
 
 | Command | Required arguments beyond `--root` | Behavior |
 |---|---|---|
 | `doctor` | None | Inspects Node/build state and prints trust limitations; no project initialization required |
 | `init` | `--project ID`, optional `--apply` | Preview by default; explicit apply creates local identity/database |
 | `identity` | None | Reads the initialized project's actual local principal |
+| `new-task` | `--task ID`, spec options below | Generates a validated task draft; writes only with `--out FILE`, never the store |
+| `review` | `--prepare [--out FILE]` or `--check --file verdict.md` | Packages evidence + reviewer prompt, or structurally validates a verdict document; records LOCAL audit entries only |
 | `create` | `--file task.json` | Validates and stores a task; this is a write, not a preview |
 | `revise` | `--task ID --file revised-task.json` | Validates a new task revision and retains history; inspect state restrictions first |
 | `run` | `--task ID --binding ID` | Executes the selected binding and records the outcome |
-| `status` | `--task ID` | Recomputes acceptance/freshness; exit `2` when not gate-ready |
+| `status` | `--task ID`, optional `--why` | Recomputes acceptance/freshness; exit `2` when not gate-ready; `--why` adds per-criterion explanations and stale-input diffs |
+| `watch` | `--task ID --binding ID`, optional `--interval S` `--max-seconds S` | Re-runs the binding while evidence is stale; stops on gate-ready, budget exhaustion, non-retryable outcomes, signal or deadline |
 | `complete` | `--task ID` | Attempts completion through the gate; cannot fill missing review |
 | `cancel` | `--task ID` | Records cancellation and requests that the owned run stop |
 | `recover` | `--task ID` | Handles an interrupted producer; does not rerun its effects |
 | `export` | `--task ID` | Prints task, records and current assessment; review output for sensitive content |
+| `board` | optional `--out FILE` | Cross-task HTML/JSON summary of gates, stale evidence, review debt and open incidents |
+| `mcp` | None | Read-only MCP stdio server: `harness_list`, `harness_status`, `harness_export`, `harness_board` |
 | `migrate` | `--task ID --file legacy.json` | Retains a legacy claim as `UNVERIFIED`; does not import an entire tracker as accepted proof |
 
 Only `init` and the separate installer have the documented preview/apply behavior. Do not infer a universal dry-run mode from the presence of `--apply` in the parser.
@@ -181,6 +186,6 @@ The CLI also handles SIGINT/SIGTERM during `run`. Stopping a process is not undo
 
 ## What does not become automatic
 
-Using the portable skill does not populate the local database, run arbitrary commands through the recorder, enroll a reviewer or write long-term memory. The memory helpers are library functionality; there is no automatic private-history miner or CLI memory command. DSH host wiring is separate, and the CLI is not an MCP server.
+Using the portable skill does not populate the local database, run arbitrary commands through the recorder, enroll a reviewer or write long-term memory. The memory helpers are library functionality; there is no automatic private-history miner or CLI memory command. DSH host wiring is separate. The `mcp` command exposes a deliberately **read-only** MCP stdio server (status, export, board); it still cannot record reviews, run bindings or mutate state.
 
 Keep `.harness/`, installation receipts and raw run exports private. The current same-user runtime remains `ASSISTED`; neither a passing local task nor a generated ZIP makes a release authorized. See the [threat model](threat-model.md) and [current implementation limits](implementation-status.md).

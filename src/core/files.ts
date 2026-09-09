@@ -30,7 +30,7 @@ export function snapshot(root:string,paths:string[],environment:Record<string,st
   if(!paths.length||new Set(paths).size!==paths.length)throw new Error('INVALID_INPUT_INVENTORY');
   const files=[...paths].sort().map(p=>fileRef(root,p));
   const env:Record<string,string>={};
-  for(const key of ['PATH','HOME','TMPDIR','TEMP','SystemRoot','WINDIR','LANG'])if(process.env[key])env[key]=process.env[key]!;
+  for(const key of ['PATH','HOME','TMPDIR','TEMP','SystemRoot','WINDIR','LANG','CARGO_HOME','RUSTUP_HOME'])if(process.env[key])env[key]=process.env[key]!;
   Object.assign(env,environment);delete env.NODE_OPTIONS;delete env.NODE_V8_COVERAGE;
   const controlFiles=['types','schema','contract','files','evaluator','recorder','reporter','store','service'];
   const controls=controlFiles.map(name=>({name,sha256:sha256(readFileSync(new URL(`./${name}.js`,import.meta.url)))}));
