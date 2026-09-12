@@ -6,7 +6,7 @@ export interface Principal { id: string; sessionId: string }
 export interface FileRef { path: string; sha256: string; bytes: number }
 export interface Snapshot { digest: string; files: FileRef[]; runtime: string }
 export interface Binding {
-  id: string; profile: string; kind: 'node-test' | 'command'; argv: string[];
+  id: string; profile: string; kind: 'node-test' | 'command' | 'cargo-test' | 'vitest'; argv: string[];
   selectors: string[]; expectedExit: number; expectedStdout: string | null;
   mutation: boolean; artifacts: string[];
 }

@@ -5,9 +5,10 @@ import {parseTask,reviewSchema,runSchema} from './contract.js';
 import {validateBaseline} from './catalog.js';
 import {distillLesson, recallLessons, type Lesson} from './memory.js';
 import {assertSchema} from './schema.js';
-import {digest,fileRef,snapshot} from './files.js';
+import {atomicWrite,digest,fileRef,safePath,snapshot} from './files.js';
 import {evaluate} from './evaluator.js';
 import {recordRun,type RunOptions} from './recorder.js';
+import {buildRequest,checkVerdict,checkRecord,requestRecord} from './review-bridge.js';
 import {Store,type StoredRecord} from './store.js';
 import {CONTRACT,type Assessment,type Principal,type Review,type RunEvidence,type TaskDefinition} from './types.js';
 
@@ -140,4 +141,85 @@ export class Harness {
     this.#store.append(this.#record('legacy',id,record,'LEGACY'));return record;
   }
   export(caller:Principal,id:string) {return {task:this.get(caller,id),records:this.#store.records(id),assessment:this.assess(caller,id)};}
+  #recorderRuns(id:string):RunEvidence[] {return this.#store.records(id,'run').filter(r=>r.origin==='RECORDER').map(r=>r.value as RunEvidence);}
+  /** Packages evidence and the reviewer prompt. Submitting the Review itself stays host-owned. */
+  reviewPrepare(caller:Principal,id:string,outPath?:string) {
+    const row=this.get(caller,id);this.#permit(caller,'read',row.definition);
+    const assessment=this.assess(caller,id);
+    const request=buildRequest(this.#root,row.definition,assessment.candidateDigest,this.#recorderRuns(id));
+    this.#store.append(requestRecord(id,request));
+    const packageSha256=digest(request);let writtenPath:string|null=null;
+    if(outPath){const target=safePath(this.#root,outPath,true);atomicWrite(target,JSON.stringify(request,null,2)+'\n');writtenPath=outPath;}
+    return {prepared:true as const,taskId:id,candidateDigest:assessment.candidateDigest,packageSha256,runIds:request.runs.map(r=>r.id),writtenPath,
+      request:outPath?undefined:request,note:'Recording the Review itself stays host-owned; this package and its check trail do not substitute for an independent reviewer.'};
+  }
+  reviewCheck(caller:Principal,id:string,verdictText:string) {
+    const row=this.get(caller,id);this.#permit(caller,'read',row.definition);
+    const check=checkVerdict(row.definition,new Set(this.#recorderRuns(id).map(r=>r.id)),verdictText);
+    this.#store.append(checkRecord(id,digest(row.definition),check));
+    return {check,note:'Structural validation only. A well-formed PASS here is not a recorded Review and does not open the gate.'};
+  }
+  attemptsRemaining(caller:Principal,id:string,bindingId:string):number {
+    const row=this.get(caller,id);this.#permit(caller,'read',row.definition);
+    const task=row.definition;if(!task.bindings.some(b=>b.id===bindingId))throw new Error('BINDING_NOT_FOUND');
+    const taskDigest=digest(task);
+    const old=this.#recorderRuns(id).filter(r=>r.bindingId===bindingId&&r.taskDigest===taskDigest).map(r=>r.id);
+    const attempted=this.#store.records(id,'attempt').map(r=>r.value as {invocationId:string;bindingId:string;taskDigest:string})
+      .filter(r=>r.bindingId===bindingId&&r.taskDigest===taskDigest).map(r=>r.invocationId);
+    return task.policy.maxAttempts-new Set([...old,...attempted]).size;
+  }
+  explain(caller:Principal,id:string) {
+    const assessment=this.assess(caller,id);const task=this.get(caller,id).definition;
+    const current=snapshot(this.#root,task.inputPaths,this.#runOptions.env);
+    const runs=this.#recorderRuns(id);
+    const DETAILS:Record<string,string>={
+      EVIDENCE_MISSING:'No run has ever executed a binding mapped to this criterion.',
+      STALE_INPUTS:'Inputs changed after the last run, so the recorded evidence no longer describes this candidate.',
+      CURRENT_FAILURE:'A current run failed and no independent PASS review resolves the failure.',
+      REVIEW_MISSING:'The policy requires independent review; no PASS review covers the current passing runs.',
+      COLLECTION_INCOMPLETE:'The run did not observe every expected selector exactly once, or observed skipped or cancelled tests.',
+      EXECUTION_INCOMPLETE:'The latest run for a required binding did not complete cleanly against its oracle.',
+      REQUIRED_BINDING_MISSING:'A binding mapped to this criterion has no current run.',
+      PROVENANCE_UNVERIFIED:'Some current evidence did not come from the recorder provenance channel.',
+      ARTIFACT_MISSING:'A declared artifact is missing or empty in the latest run.',
+      ARTIFACT_HASH_MISMATCH:'A declared artifact changed after the run recorded it.',
+      ARTIFACT_UNAVAILABLE:'A declared artifact could not be read during assessment.',
+      RUN_HAS_ERRORS:'The latest run recorded error reason codes.',
+      REVIEW_BLOCKED:'An independent reviewer returned BLOCK covering this criterion.',
+      OPEN_FINDING:'An unresolved finding is registered against this criterion.',
+      OUTSIDE_TARGET:'This criterion is outside the accepted target slice.'};
+    const criteria=assessment.criteria.map(row=>{
+      const definition=task.criteria.find(c=>c.id===row.id)!;
+      const history=runs.filter(r=>r.taskId===task.id&&definition.bindingIds.includes(r.bindingId));
+      const lastPass=history.filter(r=>r.outcome==='PASS').at(-1)??null;
+      let staleInputs:{path:string;lastSha256:string;currentSha256:string}[]|null=null;
+      if(row.freshness==='STALE'&&lastPass) {
+        const lastFiles=new Map(lastPass.candidate.files.map(f=>[f.path,f.sha256]));
+        staleInputs=current.files.filter(f=>lastFiles.get(f.path)!==f.sha256)
+          .map(f=>({path:f.path,lastSha256:lastFiles.get(f.path)??'missing-at-last-pass',currentSha256:f.sha256}));
+      }
+      return {...row,lastPass:lastPass?{runId:lastPass.id,finishedAt:lastPass.finishedAt,outcome:lastPass.outcome}:null,
+        staleInputs,detail:row.reasonCodes.map(code=>DETAILS[code]??code)};
+    });
+    return {contract:'harness-explain/1' as const,taskId:task.id,candidateDigest:current.digest,gateReady:assessment.gateReady,
+      releaseReady:assessment.releaseReady,reasonCodes:assessment.reasonCodes,criteria};
+  }
+  board(caller:Principal) {
+    return {contract:'harness-board/1' as const,projectId:this.#projectId,generatedAt:new Date().toISOString(),
+      tasks:this.#store.list().map(row=>{
+        let assessment:Assessment|null=null;
+        try{assessment=this.assess(caller,row.definition.id);}catch{assessment=null;}
+        const target=row.definition.criteria.filter(c=>c.target);
+        const rows=assessment?.criteria??[];
+        const reviewMissing=rows.filter(r=>r.reasonCodes.includes('REVIEW_MISSING')).length;
+        const reconciled=new Set(this.#store.records(row.definition.id,'reconciliation').map(r=>(r.value as {invocationId:string}).invocationId));
+        const openIncidents=this.#store.records(row.definition.id,'incident').filter(r=>!reconciled.has(r.id)).length;
+        return {id:row.definition.id,state:row.state,revision:row.definition.revision,
+          gateReady:assessment?.gateReady??false,releaseReady:false as const,
+          criteria:{target:target.length,passed:rows.filter(r=>r.outcome==='PASS').length,stale:rows.filter(r=>r.freshness==='STALE').length,
+            failed:rows.filter(r=>r.outcome==='FAIL').length,blocked:rows.filter(r=>r.outcome==='BLOCKED').length},
+          reviewMissing,openIncidents,lastActivity:this.#store.lastActivity(row.definition.id),
+          error:assessment?null:'INPUTS_UNAVAILABLE'};
+      })};
+  }
 }

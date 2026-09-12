@@ -166,7 +166,7 @@ After mounting, `harnessGate` provides delivery decisions and `harnessControl` e
 
 An operator must connect the real reviewer channel through the service API; this repo does not manufacture that identity or provide a universal DSH configuration snippet. Agent IDs and session IDs from DSH are not interchangeable with the local CLI's persisted operator identity.
 
-Missing service yields `EVIDENCE_PENDING` in the delivery bridge; missing binding yields `TASK_BINDING_REQUIRED` inside host diagnostics. Those are setup failures, not reasons to restore self-declared PASS. The CLI is **not an MCP stdio server**, so do not add `node bin/harness.mjs` as an MCP command in another agent.
+Missing service yields `EVIDENCE_PENDING` in the delivery bridge; missing binding yields `TASK_BINDING_REQUIRED` inside host diagnostics. Those are setup failures, not reasons to restore self-declared PASS. The only MCP surface is the local CLI's read-only `mcp` command (`harness_list`, `harness_status`, `harness_export`, `harness_board`); pointing a generic agent at `node bin/harness.mjs` without that subcommand is still invalid, and the read-only server cannot record reviews or run bindings.
 
 MCP settings and replay/argument plugins are DSH-specific. See their [MCP README](../vendor/dsh-mcp-settings/README.md), [plugin sources](../vendor/dsh-mcp-settings/src/index.js) and [troubleshooting](troubleshooting.md). Native DSH conformance remains unverified; the checklist above specifies what the host must supply, not a claim that it has been supplied.
 
