@@ -14,12 +14,22 @@ export async function recordRun(root:string,task:TaskDefinition,binding:Binding,
   let bytes=0,truncated=false,cause:string|null=null,dispatched=false,exitCode:number|null=null,spawnError=false;
   const reporter=fileURLToPath(new URL('./reporter.js',import.meta.url));
   let argv:string[];
-  if(binding.kind==='node-test') {
-    for(const path of binding.argv) {
-      safePath(root,path);
-      if(!task.inputPaths.includes(path))throw new Error('TEST_INPUT_NOT_PINNED');
+  if(binding.kind==='node-test'||binding.kind==='vitest') {
+    if(binding.kind==='vitest') {
+      const runner='node_modules/vitest/vitest.mjs';
+      safePath(root,runner);
+      if(!task.inputPaths.includes(runner))throw new Error('VITEST_RUNNER_NOT_PINNED');
+      argv=[process.execPath,runner,'run','--reporter=json',...binding.argv];
+    } else {
+      for(const path of binding.argv) {
+        safePath(root,path);
+        if(!task.inputPaths.includes(path))throw new Error('TEST_INPUT_NOT_PINNED');
+      }
+      argv=[process.execPath,'--test',`--test-reporter=${reporter}`,...binding.argv];
     }
-    argv=[process.execPath,'--test',`--test-reporter=${reporter}`,...binding.argv];
+  } else if(binding.kind==='cargo-test') {
+    for(const arg of binding.argv)if(arg.startsWith('-'))throw new Error('CARGO_FILTER_FLAGS_NOT_ALLOWED');
+    argv=['cargo','test',...binding.argv];
   } else {
     argv=binding.argv.map((v,i)=>i===0&&v==='$NODE'?process.execPath:v);
     // Script files passed to the command must be in the contributing input inventory.
@@ -29,7 +39,7 @@ export async function recordRun(root:string,task:TaskDefinition,binding:Binding,
     }
   }
   const env:NodeJS.ProcessEnv={};
-  for(const key of ['PATH','HOME','TMPDIR','TEMP','SystemRoot','WINDIR','LANG'])if(process.env[key])env[key]=process.env[key];
+  for(const key of ['PATH','HOME','TMPDIR','TEMP','SystemRoot','WINDIR','LANG','CARGO_HOME','RUSTUP_HOME'])if(process.env[key])env[key]=process.env[key];
   Object.assign(env,options.env??{}); delete env.NODE_OPTIONS; delete env.NODE_V8_COVERAGE;
   const secrets=[...(options.secrets??[]),...Object.entries(options.env??{}).filter(([k])=>/token|password|secret|key/i.test(k)).map(([,v])=>v)];
   if(options.signal?.aborted)cause='CANCELLED';
@@ -68,6 +78,26 @@ export async function recordRun(root:string,task:TaskDefinition,binding:Binding,
       }catch{reasons.push('REPORTER_PROTOCOL');}
     }
     stdout=logs.join('');
+    if(binding.selectors.some(s=>tests.filter(t=>t.selector===s).length!==1))reasons.push('COLLECTION_INCOMPLETE');
+    if(tests.some(t=>t.status==='SKIPPED'||t.status==='CANCELLED'))reasons.push('TEST_NOT_EXECUTED');
+  } else if(binding.kind==='cargo-test') {
+    for(const line of raw.split('\n')) {
+      const match=/^test (.+?) \.\.\. (ok|FAILED|ignored)$/.exec(line.trim());
+      if(match)tests.push({selector:match[1]!,status:match[2]==='ok'?'PASS':match[2]==='FAILED'?'FAIL':'SKIPPED',file:null});
+    }
+    if(binding.selectors.some(s=>tests.filter(t=>t.selector===s).length!==1))reasons.push('COLLECTION_INCOMPLETE');
+    if(tests.some(t=>t.status==='SKIPPED'||t.status==='CANCELLED'))reasons.push('TEST_NOT_EXECUTED');
+  } else if(binding.kind==='vitest') {
+    try {
+      const report=JSON.parse(raw) as {testResults?:{name?:string;assertionResults?:{fullName?:string;status?:string}[]}[]};
+      let collected=0;
+      for(const suite of report.testResults??[]) {
+        const file=(suite.name?relative(root,resolve(root,suite.name)):'').split('\\').join('/');
+        for(const assertion of suite.assertionResults??[]) {collected++;
+          tests.push({selector:`${file}::${assertion.fullName??''}`,status:assertion.status==='passed'?'PASS':assertion.status==='failed'?'FAIL':'SKIPPED',file:file||null});}
+      }
+      if(!collected)reasons.push('VITEST_REPORTER_PROTOCOL');
+    }catch{reasons.push('VITEST_REPORTER_PROTOCOL');}
     if(binding.selectors.some(s=>tests.filter(t=>t.selector===s).length!==1))reasons.push('COLLECTION_INCOMPLETE');
     if(tests.some(t=>t.status==='SKIPPED'||t.status==='CANCELLED'))reasons.push('TEST_NOT_EXECUTED');
   }

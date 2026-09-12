@@ -71,6 +71,10 @@ export class Store {
     return rows.filter(r=>!kind||r.kind===kind).map(r=>{const value:unknown=JSON.parse(r.value);if(digest(value)!==r.hash)throw new Error('CORRUPT_RECORD');
       return {id:r.id,kind:r.kind,taskId:r.task_id,hash:r.hash,value,origin:r.origin};});
   }
+  lastActivity(taskId:string):string|null {
+    const row=this.#db.prepare('SELECT value FROM events WHERE task_id=? ORDER BY sequence DESC LIMIT 1').get(taskId) as unknown as {value:string}|undefined;
+    if(!row)return null;try{return (JSON.parse(row.value) as {at?:string}).at??null;}catch{return null;}
+  }
   /** Called by the service after authorization. CAS and gate calculation happen inside the transaction. */
   transition(id:string,actor:Principal,expected:{sequence:number;epoch:number},next:State,
     options:{record?:StoredRecord;completionGuard?:()=>boolean;recovery?:boolean}={}):TaskRow {

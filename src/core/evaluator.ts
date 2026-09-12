@@ -23,7 +23,7 @@ export function evaluate(task:TaskDefinition,candidateDigest:string,runs:RunEvid
     for(const id of c.bindingIds){const b=task.bindings.find(b=>b.id===id);const last=current.filter(r=>r.bindingId===id).at(-1);
       if(!b||!last){row.reasonCodes.push('REQUIRED_BINDING_MISSING');continue;}
       if(last.outcome!=='PASS'||last.exitCode!==b.expectedExit||last.truncated||last.profile!==b.profile){row.reasonCodes.push('EXECUTION_INCOMPLETE');continue;}
-      if(b.kind==='node-test'&&(last.tests.some(t=>t.status!=='PASS')||b.selectors.some(s=>last.tests.filter(t=>t.selector===s&&t.status==='PASS').length!==1))){row.reasonCodes.push('COLLECTION_INCOMPLETE');continue;}
+      if(b.kind!=='command'&&(last.tests.some(t=>t.status!=='PASS')||b.selectors.some(s=>last.tests.filter(t=>t.selector===s&&t.status==='PASS').length!==1))){row.reasonCodes.push('COLLECTION_INCOMPLETE');continue;}
       if(b.artifacts.some(p=>!last.artifacts.some(a=>a.path===p&&a.bytes>0))){row.reasonCodes.push('ARTIFACT_MISSING');continue;}
       if(last.reasonCodes.length){row.reasonCodes.push('RUN_HAS_ERRORS');continue;}chosen.push(last);
     }

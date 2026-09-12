@@ -110,7 +110,9 @@
           "kind": {
             "enum": [
               "node-test",
-              "command"
+              "command",
+              "cargo-test",
+              "vitest"
             ]
           },
           "argv": {
@@ -216,7 +218,7 @@
         "maxAttempts": {
           "type": "integer",
           "minimum": 1,
-          "maximum": 3
+          "maximum": 20
         }
       },
       "required": [
